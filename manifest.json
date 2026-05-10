@@ -1,0 +1,16 @@
+{
+    "name": "Sticky Memo",
+    "short_name": "Memo",
+    "description": "跨裝置即時同步便利貼牆",
+    "start_url": "./",
+    "display": "standalone",
+    "background_color": "#f1f5f9",
+    "theme_color": "#6366f1",
+    "icons": [
+        {
+            "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzYzNjZmMSI+PHBhdGggZD0iTTE5IDNINWMtMS4xIDAtMiAuOS0yIDJ2MTRjMCAxLjEuOSAyIDIgMmgxNGMxLjEgMCAyLS45IDItMlY1YzAtMS4xLS45LTItMi0yem0wIDE2SDVWNWgxNHYxNHoiLz48cGF0aCBkPSJNMTQgMTdIN3YtMmg3djJ6bTMtNEg3di0yaDEwdjJ6bTAtNEg3VjdoMTB2MnoiLz48L3N2Zz4=",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        }
+    ]
+}
