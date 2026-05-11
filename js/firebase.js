@@ -31,9 +31,6 @@ const Cloud = {
             this.auth = authMod.getAuth(app);
             this.db = fireMod.getFirestore(app);
 
-            // Enable offline persistence
-            try { await fireMod.enableIndexedDbPersistence(this.db); } catch(e) {}
-
             // Listen auth state
             authMod.onAuthStateChanged(this.auth, (user) => this._onAuthChanged(user));
 
@@ -48,29 +45,32 @@ const Cloud = {
         }
     },
 
-    async enterRoom(roomName) {
-        if (!roomName || !this.auth) return;
+    async enterRoom(roomName, password) {
+        if (!roomName || !password || !this.auth) return;
 
         const email = roomName.trim() + '@stickymemo.app';
-        // Use room name itself as password seed
-        const pwd = 'sm_' + roomName.trim() + '_2024!';
 
         localStorage.setItem('sticky_last_room', roomName.trim());
 
         try {
-            await this.authMod.signInWithEmailAndPassword(this.auth, email, pwd);
+            await this.authMod.signInWithEmailAndPassword(this.auth, email, password);
         } catch (e) {
             if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') {
                 try {
-                    await this.authMod.createUserWithEmailAndPassword(this.auth, email, pwd);
+                    await this.authMod.createUserWithEmailAndPassword(this.auth, email, password);
                 } catch (regErr) {
                     if (regErr.code === 'auth/operation-not-allowed') {
                         App.showToast('❌ 請先在 Firebase 啟用 Email/Password 驗證');
+                    } else if (regErr.code === 'auth/weak-password') {
+                        App.showToast('❌ 密碼至少需要 6 個字元');
                     } else {
-                        App.showToast('❌ 進入房間失敗: ' + regErr.message);
+                        App.showToast('❌ 建立房間失敗: ' + regErr.message);
                     }
                     return;
                 }
+            } else if (e.code === 'auth/wrong-password') {
+                App.showToast('❌ 密碼錯誤');
+                return;
             } else if (e.code === 'auth/operation-not-allowed') {
                 App.showToast('❌ 請先在 Firebase 啟用 Email/Password 驗證');
                 return;
@@ -92,6 +92,7 @@ const Cloud = {
 
         if (user) {
             const roomName = user.email.split('@')[0];
+            App.storagePrefix = roomName;
             if (cloudBtn) { cloudBtn.classList.remove('cloud-offline'); cloudBtn.classList.add('cloud-online'); }
             App.showToast('☁️ 已連接房間: ' + roomName);
             document.getElementById('auth-current-room').textContent = roomName;
@@ -99,6 +100,7 @@ const Cloud = {
             // Sync: upload local state then listen
             this._uploadThenListen(user.uid);
         } else {
+            App.storagePrefix = 'local';
             if (cloudBtn) { cloudBtn.classList.remove('cloud-online'); cloudBtn.classList.add('cloud-offline'); }
             if (this.unsubscribe) { this.unsubscribe(); this.unsubscribe = null; }
         }
@@ -113,6 +115,9 @@ const Cloud = {
             // Cloud has data → load it
             const cloudState = snap.data();
             App.state = cloudState;
+            // Clear current notes before switching to prevent flash of old data
+            App.notes = [];
+            App._renderAllNotes();
             App.switchWall(cloudState.activeWallId);
             App.showToast('📥 已從雲端載入資料');
         } else {
@@ -140,9 +145,11 @@ const Cloud = {
 
             if (notes.length > 0) {
                 App.notes = notes;
-                localStorage.setItem('sticky_notes_' + wallId, JSON.stringify(notes));
+                localStorage.setItem(App._notesKey(wallId), JSON.stringify(notes));
                 App._renderAllNotes();
             }
+        }, (err) => {
+            console.warn('[Cloud] Listener error:', err.message);
         });
     },
 
@@ -150,7 +157,7 @@ const Cloud = {
         if (!this.currentUser || !this.db) return;
         const f = this.fireMod;
         const ref = f.doc(this.db, 'memo', this.currentUser.uid, 'meta', 'state');
-        f.setDoc(ref, App.state, { merge: true }).catch(() => {});
+        f.setDoc(ref, App.state, { merge: true }).catch(e => console.warn('[Cloud] syncState:', e.message));
     },
 
     syncNotes() {
@@ -161,7 +168,7 @@ const Cloud = {
 
         App.notes.forEach(note => {
             const ref = f.doc(this.db, 'memo', uid, 'notes_' + wallId, note.id.toString());
-            f.setDoc(ref, note, { merge: true }).catch(() => {});
+            f.setDoc(ref, note, { merge: true }).catch(e => console.warn('[Cloud] syncNote:', e.message));
         });
     },
 
@@ -169,11 +176,38 @@ const Cloud = {
         if (!this.currentUser || !this.db) return;
         const f = this.fireMod;
         const ref = f.doc(this.db, 'memo', this.currentUser.uid, 'notes_' + App.state.activeWallId, noteId.toString());
-        f.deleteDoc(ref).catch(() => {});
+        f.deleteDoc(ref).catch(e => console.warn('[Cloud] deleteNote:', e.message));
     },
 
-    relisten(wallId) {
+    /** Add a note to a specific wall's cloud collection */
+    addNoteToWall(wallId, note) {
+        if (!this.currentUser || !this.db) return;
+        const f = this.fireMod;
+        const ref = f.doc(this.db, 'memo', this.currentUser.uid, 'notes_' + wallId, note.id.toString());
+        f.setDoc(ref, note, { merge: true }).catch(e => console.warn('[Cloud] addNoteToWall:', e.message));
+    },
+
+    async relisten(wallId) {
         if (!this.currentUser) return;
-        this._listenWall(this.currentUser.uid, wallId);
+        const uid = this.currentUser.uid;
+
+        // Actively fetch latest data before setting up listener
+        try {
+            const f = this.fireMod;
+            const coll = f.collection(this.db, 'memo', uid, 'notes_' + wallId);
+            const snapshot = await f.getDocs(coll);
+            const notes = [];
+            snapshot.forEach(doc => notes.push(doc.data()));
+            if (notes.length > 0) {
+                App.notes = notes;
+                localStorage.setItem(App._notesKey(wallId), JSON.stringify(notes));
+                App._renderAllNotes();
+                App._updateNoteCount();
+            }
+        } catch (e) {
+            console.warn('[Cloud] relisten fetch:', e.message);
+        }
+
+        this._listenWall(uid, wallId);
     }
 };

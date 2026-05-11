@@ -49,9 +49,8 @@
             <button id="search-toggle" class="icon-btn-round" title="搜尋 (/)" onclick="App.toggleSearch()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             </button>
-            <button id="theme-toggle" class="icon-btn-round" title="深色模式 (D)" onclick="Theme.toggle()">
-                <svg id="theme-icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                <svg id="theme-icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <button id="tidy-btn" class="icon-btn-round" title="整理排列" onclick="App.tidyNotes()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="9" y2="18"/></svg>
             </button>
             <button id="cloud-btn" class="icon-btn-round cloud-offline" title="雲端房間" onclick="App.openAuthModal()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
@@ -84,9 +83,10 @@
             </button>
         </div>
         <div class="sidebar-footer">
-            <button class="sidebar-footer-btn" onclick="App.tidyNotes()" title="整理排列">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
-                整理
+            <button id="theme-toggle" class="sidebar-footer-btn" onclick="Theme.toggle()" title="深色模式 (D)">
+                <svg id="theme-icon-light" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg id="theme-icon-dark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg>
+                深色模式
             </button>
             <button class="sidebar-footer-btn" onclick="App.exportBackup()" title="備份">📥 備份</button>
             <button class="sidebar-footer-btn" onclick="App.importBackup()" title="匯入">📤 匯入</button>
@@ -129,8 +129,10 @@
             <div class="modal-card-glow"></div>
             <h3 class="modal-title">☁️ 雲端房間</h3>
             <div id="auth-logged-out">
-                <p class="modal-desc">輸入專屬房間名稱，即可在不同裝置間同步你的便利貼。</p>
+                <p class="modal-desc">輸入專屬房間名稱與密碼，即可在不同裝置間同步你的便利貼。</p>
+                <p class="modal-hint">⚠️ 第一次輸入的房間名會自動建立，請記住你的密碼</p>
                 <input type="text" id="auth-room-input" class="modal-input" placeholder="房間名稱（英數字）" autocomplete="off">
+                <input type="password" id="auth-pwd-input" class="modal-input" placeholder="密碼（至少 6 個字元）" autocomplete="off">
                 <button class="modal-btn-primary" onclick="App.enterRoom()">進入房間</button>
             </div>
             <div id="auth-logged-in" class="hidden">
@@ -161,6 +163,7 @@
     <div id="toast" class="toast"></div>
 
     <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="js/theme.js"></script>
     <script src="js/markdown.js"></script>

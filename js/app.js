@@ -4,6 +4,13 @@ const App = {
     notes: [],
     selectedColor: 'yellow',
     selectedSize: 'medium',
+    storagePrefix: 'local',
+    undoStack: [],
+
+    /** Generate a notes localStorage key namespaced by room */
+    _notesKey(wallId) {
+        return 'sticky_notes_' + this.storagePrefix + '_' + (wallId || this.state.activeWallId);
+    },
 
     init() {
         MD.init();
@@ -22,6 +29,7 @@ const App = {
             if (e.key === 'n' || e.key === 'N') this.createNote();
             if (e.key === 'd' || e.key === 'D') Theme.toggle();
             if (e.key === '/') { e.preventDefault(); this.toggleSearch(); }
+            if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.undo(); }
         });
 
         // Search input
@@ -39,6 +47,9 @@ const App = {
         document.addEventListener('mousedown', (e) => {
             if (!e.target.closest('.note-color-popup') && !e.target.closest('[data-action="color"]')) {
                 document.querySelectorAll('.note-color-popup.open').forEach(p => p.classList.remove('open'));
+            }
+            if (!e.target.closest('.note-move-popup') && !e.target.closest('[data-action="move"]')) {
+                document.querySelectorAll('.note-move-popup.open').forEach(p => p.classList.remove('open'));
             }
         });
 
@@ -62,7 +73,7 @@ const App = {
         const y = isMobile ? 0 : Math.max(80, Math.random() * (window.innerHeight - 400));
 
         const note = {
-            id: Date.now(),
+            id: crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).substr(2, 9),
             title: '',
             content: '',
             color: this.selectedColor,
@@ -94,13 +105,37 @@ const App = {
         const el = document.getElementById('note-' + id);
         if (!el) return;
 
+        const note = this.notes.find(n => n.id === id);
+
         el.classList.add('removing');
         setTimeout(() => {
             el.remove();
             this.notes = this.notes.filter(n => n.id !== id);
             this.saveLocal();
             this._updateNoteCount();
-            Cloud.deleteNote(id);
+
+            // Push to undo stack instead of immediately deleting from cloud
+            if (note) {
+                this.undoStack.push({
+                    action: 'delete',
+                    note: { ...note },
+                    wallId: this.state.activeWallId,
+                    timestamp: Date.now()
+                });
+
+                // Show toast with undo button
+                this.showToastWithUndo('已刪除便利貼', () => this.undo());
+
+                // Delayed cloud delete (5 seconds)
+                const undoEntry = this.undoStack[this.undoStack.length - 1];
+                undoEntry._cloudTimer = setTimeout(() => {
+                    if (this.undoStack.includes(undoEntry)) {
+                        Cloud.deleteNote(id);
+                    }
+                }, 5000);
+            } else {
+                Cloud.deleteNote(id);
+            }
         }, 300);
     },
 
@@ -136,10 +171,12 @@ const App = {
     changeNoteColor(id, color) {
         const note = this.notes.find(n => n.id === id);
         if (!note) return;
+        const oldColor = note.color;
         note.color = color;
         const el = document.getElementById('note-' + id);
         if (el) {
-            el.className = el.className.replace(/note-\w+/, 'note-' + color);
+            el.classList.remove('note-' + oldColor);
+            el.classList.add('note-' + color);
         }
         this.saveLocal();
     },
@@ -157,10 +194,121 @@ const App = {
         this.selectedSize = size;
     },
 
+    // ===== Move Note to Another Wall =====
+    moveNoteToWall(noteId, targetWallId) {
+        const note = this.notes.find(n => n.id === noteId);
+        if (!note) return;
+        const fromWallId = this.state.activeWallId;
+        const targetWall = this.state.walls.find(w => w.id === targetWallId);
+        if (!targetWall) return;
+
+        // Remove from current wall
+        this.notes = this.notes.filter(n => n.id !== noteId);
+        const el = document.getElementById('note-' + noteId);
+        if (el) {
+            el.classList.add('removing');
+            setTimeout(() => el.remove(), 300);
+        }
+        this.saveLocal();
+        this._updateNoteCount();
+
+        // Add to target wall's localStorage
+        const targetKey = this._notesKey(targetWallId);
+        let targetNotes = [];
+        try { targetNotes = JSON.parse(localStorage.getItem(targetKey)) || []; } catch(e) {}
+        // Reset position for target wall
+        note.x = Math.max(20, Math.random() * 400);
+        note.y = Math.max(80, Math.random() * 300);
+        targetNotes.push(note);
+        localStorage.setItem(targetKey, JSON.stringify(targetNotes));
+
+        // Cloud sync
+        Cloud.deleteNote(noteId);
+        Cloud.addNoteToWall(targetWallId, note);
+
+        // Push undo
+        this.undoStack.push({
+            action: 'move',
+            note: { ...note },
+            fromWallId,
+            toWallId: targetWallId,
+            timestamp: Date.now()
+        });
+
+        this.showToastWithUndo(`已移動到「${targetWall.name}」`, () => this.undo());
+    },
+
+    // ===== Undo =====
+    undo() {
+        if (this.undoStack.length === 0) {
+            this.showToast('沒有可復原的操作');
+            return;
+        }
+
+        const entry = this.undoStack.pop();
+
+        if (entry.action === 'delete') {
+            // Cancel delayed cloud delete
+            if (entry._cloudTimer) clearTimeout(entry._cloudTimer);
+
+            // Restore note to original wall
+            if (entry.wallId === this.state.activeWallId) {
+                // Same wall — add back and render
+                this.notes.push(entry.note);
+                this.saveLocal();
+                Notes.render(entry.note, document.getElementById('wall'));
+                this._updateNoteCount();
+            } else {
+                // Different wall — add to localStorage
+                const key = this._notesKey(entry.wallId);
+                let wallNotes = [];
+                try { wallNotes = JSON.parse(localStorage.getItem(key)) || []; } catch(e) {}
+                wallNotes.push(entry.note);
+                localStorage.setItem(key, JSON.stringify(wallNotes));
+            }
+            // Re-add to cloud
+            Cloud.addNoteToWall(entry.wallId, entry.note);
+            this.showToast('✅ 已復原刪除');
+
+        } else if (entry.action === 'move') {
+            // Move back: remove from toWallId, add to fromWallId
+            const toKey = this._notesKey(entry.toWallId);
+            let toNotes = [];
+            try { toNotes = JSON.parse(localStorage.getItem(toKey)) || []; } catch(e) {}
+            toNotes = toNotes.filter(n => n.id !== entry.note.id);
+            localStorage.setItem(toKey, JSON.stringify(toNotes));
+
+            // Restore position
+            const fromKey = this._notesKey(entry.fromWallId);
+            let fromNotes = [];
+            try { fromNotes = JSON.parse(localStorage.getItem(fromKey)) || []; } catch(e) {}
+            fromNotes.push(entry.note);
+            localStorage.setItem(fromKey, JSON.stringify(fromNotes));
+
+            // If we're viewing the from wall, re-render
+            if (entry.fromWallId === this.state.activeWallId) {
+                this.notes = fromNotes;
+                this._renderAllNotes();
+                this._updateNoteCount();
+            } else if (entry.toWallId === this.state.activeWallId) {
+                this.notes = toNotes;
+                this._renderAllNotes();
+                this._updateNoteCount();
+            }
+
+            // Cloud: delete from target, add back to source
+            Cloud.deleteNote(entry.note.id);
+            Cloud.addNoteToWall(entry.fromWallId, entry.note);
+
+            const fromWall = this.state.walls.find(w => w.id === entry.fromWallId);
+            this.showToast(`✅ 已復原，移回「${fromWall ? fromWall.name : entry.fromWallId}」`);
+        }
+    },
+
     // ===== Walls =====
     switchWall(id) {
         this.state.activeWallId = id;
-        const local = localStorage.getItem('sticky_notes_' + id);
+        const local = localStorage.getItem(this._notesKey(id));
         this.notes = local ? JSON.parse(local) : [];
         this._renderAllNotes();
         Walls.renderSidebar(this.state);
@@ -189,7 +337,7 @@ const App = {
     // ===== Save =====
     saveLocal() {
         localStorage.setItem('sticky_app_state', JSON.stringify(this.state));
-        localStorage.setItem('sticky_notes_' + this.state.activeWallId, JSON.stringify(this.notes));
+        localStorage.setItem(this._notesKey(), JSON.stringify(this.notes));
         Cloud.syncState();
         Cloud.syncNotes();
     },
@@ -223,7 +371,12 @@ const App = {
         const START_X = 80, START_Y = 80, STEP_X = 40, STEP_Y = 60;
         let curX = START_X, curY = START_Y;
 
-        this.notes.sort((a, b) => a.id - b.id).forEach(note => {
+        this.notes.sort((a, b) => {
+            // Compare by creation time; handle both number timestamps and UUID strings
+            const aTime = typeof a.id === 'number' ? a.id : (a.createdAt || 0);
+            const bTime = typeof b.id === 'number' ? b.id : (b.createdAt || 0);
+            return aTime - bTime;
+        }).forEach(note => {
             const el = document.getElementById('note-' + note.id);
             if (!el || el.classList.contains('filtered-out')) return;
             if (curY + 300 > window.innerHeight - 80) { curX += 320; curY = START_Y; }
@@ -233,13 +386,12 @@ const App = {
             curX += STEP_X; curY += STEP_Y;
         });
         this.saveLocal();
-        this.toggleSidebar();
         this.showToast('✅ 已整理排列');
     },
 
     // ===== Backup =====
     exportBackup() {
-        const data = { appState: this.state, notes: {} };
+        const data = { appState: this.state, storagePrefix: this.storagePrefix, notes: {} };
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             if (key.startsWith('sticky_notes_')) data.notes[key] = JSON.parse(localStorage.getItem(key));
@@ -297,15 +449,20 @@ const App = {
     },
 
     async enterRoom() {
-        const input = document.getElementById('auth-room-input');
-        const room = input.value.trim();
+        const roomInput = document.getElementById('auth-room-input');
+        const pwdInput = document.getElementById('auth-pwd-input');
+        const room = roomInput.value.trim();
+        const pwd = pwdInput.value;
         if (!room) { this.showToast('請輸入房間名稱'); return; }
-        await Cloud.enterRoom(room);
+        if (!pwd || pwd.length < 6) { this.showToast('密碼至少需要 6 個字元'); return; }
+        await Cloud.enterRoom(room, pwd);
         this.closeAuthModal();
     },
 
     async leaveRoom() {
         await Cloud.leaveRoom();
+        this.storagePrefix = 'local';
+        this.switchWall(this.state.activeWallId);
         this.closeAuthModal();
         this.showToast('已離開房間，切換為離線模式');
     },
@@ -367,7 +524,7 @@ const App = {
         } else if (this._wallModalMode === 'delete') {
             const oldId = this._wallModalTargetId;
             this.state.walls = this.state.walls.filter(x => x.id !== oldId);
-            localStorage.removeItem('sticky_notes_' + oldId);
+            localStorage.removeItem(this._notesKey(oldId));
             if (oldId === this.state.activeWallId) {
                 this.switchWall(this.state.walls[0].id);
             } else {
@@ -382,10 +539,29 @@ const App = {
     showToast(msg) {
         const t = document.getElementById('toast');
         if (!t) return;
-        t.textContent = msg;
+        t.innerHTML = msg;
+        t.classList.remove('with-undo');
         t.classList.add('show');
         clearTimeout(this._toastTimer);
         this._toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+    },
+
+    showToastWithUndo(msg, undoCallback) {
+        const t = document.getElementById('toast');
+        if (!t) return;
+        t.innerHTML = `${msg} <button class="toast-undo-btn" id="toast-undo-btn">復原</button>`;
+        t.classList.add('show', 'with-undo');
+        clearTimeout(this._toastTimer);
+
+        const undoBtn = document.getElementById('toast-undo-btn');
+        if (undoBtn) {
+            undoBtn.onclick = () => {
+                undoCallback();
+                t.classList.remove('show');
+            };
+        }
+
+        this._toastTimer = setTimeout(() => t.classList.remove('show', 'with-undo'), 5000);
     }
 };
 

@@ -12,9 +12,11 @@ const MD = {
     render(text) {
         if (!text || typeof marked === 'undefined') return text || '';
         try {
-            // Sanitize: strip script tags
             let html = marked.parse(text);
-            html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+            // Sanitize with DOMPurify to prevent XSS
+            if (typeof DOMPurify !== 'undefined') {
+                html = DOMPurify.sanitize(html);
+            }
             return html;
         } catch (e) {
             return text;
