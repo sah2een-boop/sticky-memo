@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sticky-memo-v3';
+const CACHE_NAME = 'sticky-memo-v4';
 const ASSETS = [
     './',
     './index.html',

@@ -29,7 +29,8 @@ const Notes = {
             this._dragState = {
                 el: noteEl, note,
                 startX: cx, startY: cy,
-                offsetX: 0, offsetY: 0,
+                initialLeft: parseInt(noteEl.style.left) || 0,
+                initialTop: parseInt(noteEl.style.top) || 0,
                 isDragging: false,
                 target: e.target
             };
@@ -50,14 +51,12 @@ const Notes = {
                 this._dragState.isDragging = true;
                 this._dragState.el.classList.add('dragging');
                 this._dragState.el.style.zIndex = ++this.highestZ;
-
-                const rect = this._dragState.el.getBoundingClientRect();
-                this._dragState.offsetX = this._dragState.startX - rect.left;
-                this._dragState.offsetY = this._dragState.startY - rect.top;
             }
 
-            this._dragState.el.style.left = (cx - this._dragState.offsetX) + 'px';
-            this._dragState.el.style.top = (cy - this._dragState.offsetY) + 'px';
+            const dx = cx - this._dragState.startX;
+            const dy = cy - this._dragState.startY;
+            this._dragState.el.style.left = (this._dragState.initialLeft + dx) + 'px';
+            this._dragState.el.style.top = (this._dragState.initialTop + dy) + 'px';
         };
 
         const onEnd = () => {
