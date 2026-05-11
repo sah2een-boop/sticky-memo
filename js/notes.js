@@ -4,36 +4,35 @@ const Notes = {
 
     // ===== Event Delegation for Drag (single handler on document) =====
     _dragState: null,
+    DRAG_THRESHOLD: 5,
 
     initDragDelegation() {
-        // Only one set of handlers on document for ALL notes
         const onStart = (e) => {
-            if (window.innerWidth <= 768) return; // Skip on mobile
+            if (window.innerWidth <= 768) return;
 
             const noteEl = e.target.closest('.sticky-note');
             if (!noteEl) return;
 
-            // Exclude interactive elements
             if (e.target.closest('.note-actions')) return;
             if (e.target.closest('.note-color-popup')) return;
             if (e.target.closest('.note-move-popup')) return;
-            if (e.target.closest('.note-markdown')) return;
-            if (e.target.tagName === 'TEXTAREA') return;
             if (e.target.tagName === 'BUTTON') return;
+            if (e.target.tagName === 'TEXTAREA') return;
 
             const noteId = noteEl.id.replace('note-', '');
             const note = App.notes.find(n => String(n.id) === noteId);
             if (!note) return;
 
-            this._dragState = { el: noteEl, note };
-            noteEl.classList.add('dragging');
-            noteEl.style.zIndex = ++this.highestZ;
-
-            const rect = noteEl.getBoundingClientRect();
             const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
             const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-            this._dragState.offsetX = cx - rect.left;
-            this._dragState.offsetY = cy - rect.top;
+
+            this._dragState = {
+                el: noteEl, note,
+                startX: cx, startY: cy,
+                offsetX: 0, offsetY: 0,
+                isDragging: false,
+                target: e.target
+            };
 
             if (e.cancelable) e.preventDefault();
         };
@@ -42,18 +41,44 @@ const Notes = {
             if (!this._dragState) return;
             const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
             const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+
+            if (!this._dragState.isDragging) {
+                const dx = cx - this._dragState.startX;
+                const dy = cy - this._dragState.startY;
+                if (Math.abs(dx) < this.DRAG_THRESHOLD && Math.abs(dy) < this.DRAG_THRESHOLD) return;
+
+                this._dragState.isDragging = true;
+                this._dragState.el.classList.add('dragging');
+                this._dragState.el.style.zIndex = ++this.highestZ;
+
+                const rect = this._dragState.el.getBoundingClientRect();
+                this._dragState.offsetX = this._dragState.startX - rect.left;
+                this._dragState.offsetY = this._dragState.startY - rect.top;
+            }
+
             this._dragState.el.style.left = (cx - this._dragState.offsetX) + 'px';
             this._dragState.el.style.top = (cy - this._dragState.offsetY) + 'px';
         };
 
         const onEnd = () => {
             if (!this._dragState) return;
-            const { el, note } = this._dragState;
-            el.classList.remove('dragging');
-            note.x = parseInt(el.style.left);
-            note.y = parseInt(el.style.top);
-            note.zIndex = this.highestZ;
-            App.saveLocal();
+            const { el, note, isDragging, target } = this._dragState;
+
+            if (isDragging) {
+                el.classList.remove('dragging');
+                note.x = parseInt(el.style.left);
+                note.y = parseInt(el.style.top);
+                note.zIndex = this.highestZ;
+                App.saveLocal();
+            } else {
+                const mdView = target.closest('.note-markdown');
+                if (mdView) {
+                    mdView.style.display = 'none';
+                    const contentEl = el.querySelector('.note-content');
+                    if (contentEl) { contentEl.style.display = 'block'; contentEl.focus(); }
+                }
+            }
+
             this._dragState = null;
         };
 

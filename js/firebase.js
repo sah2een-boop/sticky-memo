@@ -121,10 +121,16 @@ const Cloud = {
             App.switchWall(cloudState.activeWallId);
             App.showToast('📥 已從雲端載入資料');
         } else {
-            // First time → upload local data
+            // First time in this room → start with clean slate
+            App.notes = [];
+            App.state = { activeWallId: 'default', walls: [{ id: 'default', name: '預設牆面' }] };
+            App._renderAllNotes();
+            App._updateNoteCount();
+            Walls.renderSidebar(App.state);
+            document.getElementById('current-wall-name').textContent = '預設牆面';
             this.syncState();
             this.syncNotes();
-            App.showToast('📤 已將本地資料上傳至雲端');
+            App.showToast('🆕 新房間已建立');
         }
 
         // Listen for changes
@@ -157,7 +163,10 @@ const Cloud = {
         if (!this.currentUser || !this.db) return;
         const f = this.fireMod;
         const ref = f.doc(this.db, 'memo', this.currentUser.uid, 'meta', 'state');
-        f.setDoc(ref, App.state, { merge: true }).catch(e => console.warn('[Cloud] syncState:', e.message));
+        f.setDoc(ref, App.state, { merge: true }).catch(e => {
+            console.warn('[Cloud] syncState:', e.message);
+            App.showToast('⚠️ 牆面狀態同步失敗');
+        });
     },
 
     syncNotes() {
@@ -165,10 +174,15 @@ const Cloud = {
         const f = this.fireMod;
         const uid = this.currentUser.uid;
         const wallId = App.state.activeWallId;
+        let failCount = 0;
 
         App.notes.forEach(note => {
             const ref = f.doc(this.db, 'memo', uid, 'notes_' + wallId, note.id.toString());
-            f.setDoc(ref, note, { merge: true }).catch(e => console.warn('[Cloud] syncNote:', e.message));
+            f.setDoc(ref, note, { merge: true }).catch(e => {
+                console.warn('[Cloud] syncNote:', e.message);
+                failCount++;
+                if (failCount === 1) App.showToast('⚠️ 部分便利貼同步失敗');
+            });
         });
     },
 
