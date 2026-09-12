@@ -97,6 +97,19 @@
     <!-- Wall Container -->
     <main id="wall" class="wall"></main>
 
+    <!-- Chat Container (for chat wall mode) -->
+    <div id="chat-wrapper" class="chat-wrapper hidden">
+        <div id="chat-messages" class="chat-messages">
+            <div id="chat-message-list"></div>
+        </div>
+        <div id="chat-input-bar" class="chat-input-bar">
+            <input type="file" id="chat-file-input" style="display:none" multiple>
+            <button id="chat-attach-btn" class="chat-btn-icon" onclick="document.getElementById('chat-file-input').click()" title="上傳檔案/圖片">📎</button>
+            <textarea id="chat-text-input" class="chat-text-input" placeholder="輸入訊息... (Enter 送出，Shift+Enter 換行，支援 Ctrl+V 貼圖)" rows="1"></textarea>
+            <button id="chat-send-btn" class="chat-btn-send" onclick="Chat.handleSendClick()" title="送出訊息">➤</button>
+        </div>
+    </div>
+
     <!-- FAB: Add Note -->
     <button id="fab-add" class="fab" onclick="App.createNote()" title="新增便利貼 (N)">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -138,7 +151,10 @@
             <div id="auth-logged-in" class="hidden">
                 <p class="modal-desc">目前房間：</p>
                 <p class="modal-room-name" id="auth-current-room"></p>
-                <button class="modal-btn-danger" onclick="App.leaveRoom()">離開房間</button>
+                <div style="display:flex; gap:8px; margin-top:12px;">
+                    <button class="modal-btn-secondary" style="flex:1" onclick="App.leaveRoom()">離開房間</button>
+                    <button class="modal-btn-danger" style="flex:1" onclick="App.deleteRoom()">🗑️ 刪除房間</button>
+                </div>
             </div>
         </div>
     </div>
@@ -150,6 +166,19 @@
             <h3 class="modal-title" id="wall-modal-title">牆面管理</h3>
             <div id="wall-modal-input-group">
                 <input type="text" id="wall-modal-input" class="modal-input" placeholder="牆面名稱">
+                <div id="wall-modal-type-group" style="margin-bottom: 16px;">
+                    <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); display: block; margin-bottom: 6px;">牆面模式：</label>
+                    <div style="display: flex; gap: 8px;">
+                        <label style="flex: 1; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 2px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 0.85rem;" class="wall-type-option">
+                            <input type="radio" name="wall-type" value="sticky" checked>
+                            <span>🗒️ 便利貼</span>
+                        </label>
+                        <label style="flex: 1; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 2px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 0.85rem;" class="wall-type-option">
+                            <input type="radio" name="wall-type" value="chat">
+                            <span>💬 對話牆</span>
+                        </label>
+                    </div>
+                </div>
             </div>
             <p id="wall-modal-desc" class="modal-desc hidden"></p>
             <div class="modal-actions">
@@ -162,6 +191,15 @@
     <!-- Toast -->
     <div id="toast" class="toast"></div>
 
+    <!-- Image Lightbox Modal -->
+    <div id="image-lightbox" class="lightbox-overlay hidden" onclick="Notes.closeLightbox()">
+        <div class="lightbox-content" onclick="event.stopPropagation()">
+            <img id="lightbox-img" src="" alt="放大預覽">
+            <button class="lightbox-close" onclick="Notes.closeLightbox()" title="關閉預覽">✕</button>
+            <div id="lightbox-caption" class="lightbox-caption"></div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -169,6 +207,7 @@
     <script src="js/markdown.js"></script>
     <script src="js/search.js"></script>
     <script src="js/notes.js"></script>
+    <script src="js/chat.js"></script>
     <script src="js/walls.js"></script>
     <script src="js/firebase.js"></script>
     <script src="js/app.js"></script>

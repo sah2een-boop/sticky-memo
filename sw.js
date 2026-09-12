@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sticky-memo-v4';
+const CACHE_NAME = 'sticky-memo-v5';
 const ASSETS = [
     './',
     './index.html',
@@ -7,6 +7,7 @@ const ASSETS = [
     './js/markdown.js',
     './js/search.js',
     './js/notes.js',
+    './js/chat.js',
     './js/walls.js',
     './js/firebase.js',
     './js/app.js'

@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "https://sah2een-boop.github.io",
+      "http://localhost:5500",
+      "http://127.0.0.1:5500"
+    ],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": ["Content-Type", "Authorization"]
+  }
+]

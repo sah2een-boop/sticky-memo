@@ -4,6 +4,12 @@ const Search = {
 
     filter(notes, term) {
         this.term = (term || '').toLowerCase().trim();
+        const activeWall = App.state.walls.find(w => w.id === App.state.activeWallId);
+        if (activeWall && activeWall.type === 'chat') {
+            if (typeof Chat !== 'undefined') Chat.filter(this.term);
+            return;
+        }
+
         const wall = document.getElementById('wall');
         if (!wall) return;
 

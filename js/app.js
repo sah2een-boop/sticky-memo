@@ -130,7 +130,7 @@ const App = {
                 const undoEntry = this.undoStack[this.undoStack.length - 1];
                 undoEntry._cloudTimer = setTimeout(() => {
                     if (this.undoStack.includes(undoEntry)) {
-                        Cloud.deleteNote(id);
+                        Cloud.deleteNote(id, note.attachments);
                     }
                 }, 5000);
             } else {
@@ -308,16 +308,46 @@ const App = {
     // ===== Walls =====
     switchWall(id) {
         this.state.activeWallId = id;
-        const local = localStorage.getItem(this._notesKey(id));
-        this.notes = local ? JSON.parse(local) : [];
-        this._renderAllNotes();
+        const wall = this.state.walls.find(w => w.id === id);
+        const wallEl = document.getElementById('wall');
+        const chatWrapper = document.getElementById('chat-wrapper');
+        const fab = document.getElementById('fab-add');
+        const colors = document.getElementById('toolbar-colors');
+        const tidy = document.getElementById('tidy-btn');
+        const mobileToolbar = document.getElementById('mobile-toolbar');
+
+        const isChat = wall && wall.type === 'chat';
+
+        if (isChat) {
+            if (wallEl) wallEl.style.display = 'none';
+            if (chatWrapper) chatWrapper.classList.remove('hidden');
+            if (fab) fab.style.display = 'none';
+            if (colors) colors.style.display = 'none';
+            if (tidy) tidy.style.display = 'none';
+            if (mobileToolbar) mobileToolbar.style.display = 'none';
+
+            if (typeof Chat !== 'undefined') Chat.initWall(id);
+        } else {
+            if (wallEl) wallEl.style.display = '';
+            if (chatWrapper) chatWrapper.classList.add('hidden');
+            if (fab) fab.style.display = '';
+            if (colors) colors.style.display = '';
+            if (tidy) tidy.style.display = '';
+            if (mobileToolbar) mobileToolbar.style.display = '';
+
+            const local = localStorage.getItem(this._notesKey(id));
+            this.notes = local ? JSON.parse(local) : [];
+            this._renderAllNotes();
+            this._updateNoteCount();
+            Cloud.relisten(id, 'sticky');
+        }
+
         Walls.renderSidebar(this.state);
-
-        const wallName = this.state.walls.find(w => w.id === id);
-        document.getElementById('current-wall-name').textContent = wallName ? wallName.name : id;
-        this._updateNoteCount();
-
-        Cloud.relisten(id);
+        const nameEl = document.getElementById('current-wall-name');
+        if (nameEl) {
+            const icon = isChat ? '💬 ' : '🗒️ ';
+            nameEl.textContent = icon + (wall ? wall.name : id);
+        }
     },
 
     _renderAllNotes() {
@@ -390,18 +420,43 @@ const App = {
     },
 
     // ===== Backup =====
-    exportBackup() {
-        const data = { appState: this.state, storagePrefix: this.storagePrefix, notes: {} };
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key.startsWith('sticky_notes_')) data.notes[key] = JSON.parse(localStorage.getItem(key));
+    async exportBackup() {
+        const data = { appState: this.state, storagePrefix: this.storagePrefix, notes: {}, messages: {} };
+
+        for (const wall of this.state.walls) {
+            if (wall.type === 'chat') {
+                const msgKey = `sticky_messages_${this.storagePrefix}_${wall.id}`;
+                if (Cloud.currentUser) {
+                    const cloudMsgs = await Cloud.getAllMessagesForWall(wall.id);
+                    if (cloudMsgs && cloudMsgs.length > 0) {
+                        data.messages[msgKey] = cloudMsgs;
+                        continue;
+                    }
+                }
+                const local = localStorage.getItem(msgKey);
+                if (local) data.messages[msgKey] = JSON.parse(local);
+            } else {
+                const key = this._notesKey(wall.id);
+                // Try Firestore first if in cloud mode
+                if (Cloud.currentUser) {
+                    const cloudNotes = await Cloud.getAllNotesForWall(wall.id);
+                    if (cloudNotes && cloudNotes.length > 0) {
+                        data.notes[key] = cloudNotes;
+                        continue;
+                    }
+                }
+                // Fallback to localStorage
+                const local = localStorage.getItem(key);
+                if (local) data.notes[key] = JSON.parse(local);
+            }
         }
+
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `sticky_memo_backup_${new Date().toISOString().slice(0,10)}.json`;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        this.showToast('📥 備份已下載');
+        this.showToast('📥 備份已下載（全部牆面與對話）');
     },
 
     importBackup() {
@@ -411,18 +466,53 @@ const App = {
             const file = e.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = (ev) => {
+            reader.onload = async (ev) => {
                 try {
                     const data = JSON.parse(ev.target.result);
-                    if (data.appState) {
-                        localStorage.setItem('sticky_app_state', JSON.stringify(data.appState));
+                    if (!data.appState || (!data.notes && !data.messages)) {
+                        this.showToast('❌ 檔案格式錯誤'); return;
                     }
-                    for (const key in data.notes) {
-                        localStorage.setItem(key, JSON.stringify(data.notes[key]));
+                    if (!confirm('匯入將覆蓋當前所有便利貼與對話紀錄，確定嗎？')) return;
+
+                    const oldPrefix = data.storagePrefix || 'local';
+                    const newPrefix = this.storagePrefix;
+
+                    // Update app state (wall list)
+                    this.state = data.appState;
+                    localStorage.setItem('sticky_app_state', JSON.stringify(this.state));
+
+                    // Convert prefix and write notes to localStorage
+                    const notesMap = {}; // wallId -> notes array
+                    if (data.notes) {
+                        for (const [oldKey, notes] of Object.entries(data.notes)) {
+                            const newKey = oldKey.replace('sticky_notes_' + oldPrefix, 'sticky_notes_' + newPrefix);
+                            localStorage.setItem(newKey, JSON.stringify(notes));
+                            const wallId = newKey.replace('sticky_notes_' + newPrefix + '_', '');
+                            notesMap[wallId] = notes;
+                        }
                     }
-                    this.showToast('📤 匯入成功，重新載入中...');
+
+                    // Convert prefix and write messages to localStorage
+                    const messagesMap = {};
+                    if (data.messages) {
+                        for (const [oldKey, msgs] of Object.entries(data.messages)) {
+                            const newKey = oldKey.replace('sticky_messages_' + oldPrefix, 'sticky_messages_' + newPrefix);
+                            localStorage.setItem(newKey, JSON.stringify(msgs));
+                            const wallId = newKey.replace('sticky_messages_' + newPrefix + '_', '');
+                            messagesMap[wallId] = msgs;
+                        }
+                    }
+
+                    // If in cloud mode, sync everything to Firestore
+                    if (Cloud.currentUser) {
+                        this.showToast('📤 匯入中，正在同步到雲端...');
+                        await Cloud.syncAllWalls(this.state.walls, notesMap, messagesMap);
+                    }
+
+                    this.showToast('✅ 匯入成功，重新載入中...');
                     setTimeout(() => location.reload(), 1000);
                 } catch (err) {
+                    console.error('[Import]', err);
                     this.showToast('❌ 檔案格式錯誤');
                 }
             };
@@ -467,6 +557,27 @@ const App = {
         this.showToast('已離開房間，切換為離線模式');
     },
 
+    async deleteRoom() {
+        if (!Cloud.currentUser) { this.showToast('尚未進入房間'); return; }
+        if (!confirm('⚠️ 確定要刪除整個房間嗎？\n所有牆面與便利貼將永久刪除，無法復原！')) return;
+        if (!confirm('再次確認：真的要永久刪除嗎？')) return;
+
+        this.showToast('🗑️ 正在刪除房間資料...');
+        await Cloud.deleteRoom();
+
+        // Clear all local storage for this room
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith('sticky_')) keysToRemove.push(key);
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+
+        this.closeAuthModal();
+        this.showToast('✅ 房間已刪除，重新載入中...');
+        setTimeout(() => location.reload(), 1000);
+    },
+
     // ===== Wall Modals =====
     _wallModalMode: null,
     _wallModalTargetId: null,
@@ -476,6 +587,10 @@ const App = {
         document.getElementById('wall-modal-title').textContent = '新增牆面';
         document.getElementById('wall-modal-input').value = '';
         document.getElementById('wall-modal-input-group').style.display = 'block';
+        const typeGroup = document.getElementById('wall-modal-type-group');
+        if (typeGroup) typeGroup.style.display = 'block';
+        const defaultRadio = document.querySelector('input[name="wall-type"][value="sticky"]');
+        if (defaultRadio) defaultRadio.checked = true;
         document.getElementById('wall-modal-desc').classList.add('hidden');
         document.getElementById('wall-modal').classList.remove('hidden');
     },
@@ -487,6 +602,8 @@ const App = {
         document.getElementById('wall-modal-title').textContent = '重新命名';
         document.getElementById('wall-modal-input').value = w ? w.name : '';
         document.getElementById('wall-modal-input-group').style.display = 'block';
+        const typeGroup = document.getElementById('wall-modal-type-group');
+        if (typeGroup) typeGroup.style.display = 'none';
         document.getElementById('wall-modal-desc').classList.add('hidden');
         document.getElementById('wall-modal').classList.remove('hidden');
     },
@@ -513,18 +630,24 @@ const App = {
 
         if (this._wallModalMode === 'add' && val) {
             const id = 'wall_' + Date.now();
-            this.state.walls.push({ id, name: val });
+            const wallType = document.querySelector('input[name="wall-type"]:checked')?.value || 'sticky';
+            this.state.walls.push({ id, name: val, type: wallType });
             this.switchWall(id);
         } else if (this._wallModalMode === 'rename' && val) {
             const w = this.state.walls.find(x => x.id === this._wallModalTargetId);
             if (w) w.name = val;
             Walls.renderSidebar(this.state);
             const nameEl = document.getElementById('current-wall-name');
-            if (this._wallModalTargetId === this.state.activeWallId && nameEl) nameEl.textContent = val;
+            if (this._wallModalTargetId === this.state.activeWallId && nameEl) {
+                const icon = w.type === 'chat' ? '💬 ' : '🗒️ ';
+                nameEl.textContent = icon + val;
+            }
         } else if (this._wallModalMode === 'delete') {
             const oldId = this._wallModalTargetId;
             this.state.walls = this.state.walls.filter(x => x.id !== oldId);
             localStorage.removeItem(this._notesKey(oldId));
+            localStorage.removeItem(`sticky_messages_${this.storagePrefix}_${oldId}`);
+            Cloud.deleteWall(oldId);
             if (oldId === this.state.activeWallId) {
                 this.switchWall(this.state.walls[0].id);
             } else {
